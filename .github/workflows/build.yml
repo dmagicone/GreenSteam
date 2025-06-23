@@ -1,0 +1,31 @@
+name: Build SteamConfigEditor
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v3
+      with:
+        dotnet-version: '6.0.x'
+
+    - name: Restore dependencies
+      run: dotnet restore SteamConfigEditor.sln
+
+    - name: Build
+      run: dotnet build SteamConfigEditor.sln --configuration Release --no-restore
+
+    - name: Publish artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: SteamConfigEditor-exe
+        path: SteamConfigEditor/bin/Release/net6.0-windows/SteamConfigEditor.exe
