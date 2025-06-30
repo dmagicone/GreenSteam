@@ -7,3 +7,6 @@ The app remembers the location you specify for the Steam and Applist folders. Yo
 This app assumes you have GreemLuma already installed and know how to install the games from the steam console prompt.
 
 The code is probably a mess. Mostly done with the help of AI. 
+
+
+![image](https://github.com/user-attachments/assets/2aff7e0e-7ff4-42db-bd2c-65d78bc3255c)
