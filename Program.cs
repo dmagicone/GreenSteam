@@ -588,7 +588,7 @@ public MainForm()
             return true;
         }
         
-        private void EditConfig()
+		private void EditConfig()
         {
                 var steamFolder = steamPathTextBox.Text;
                 var luaFolder = luaFolderTextBox.Text;
@@ -624,14 +624,22 @@ public MainForm()
                 }));
                 var lines = File.ReadAllLines(configPath).ToList();
 
-                // Find the "CurrentCellID" line
-                int currentCellLine = lines.FindIndex(line => line.Contains("\"CurrentCellID\""));
-                if (currentCellLine == -1)
-                        throw new InvalidOperationException("\"CurrentCellID\" not found in config.");
+                // Find the "CurrentCellID" line, or fallback to "RecentDownloadRate"
+                int targetLine = lines.FindIndex(line => line.Contains("\"CurrentCellID\""));
+                string searchedFor = "CurrentCellID";
+                
+                if (targetLine == -1)
+                {
+                        targetLine = lines.FindIndex(line => line.Contains("\"RecentDownloadRate\""));
+                        searchedFor = "RecentDownloadRate";
+                }
+                
+                if (targetLine == -1)
+                        throw new InvalidOperationException("Neither \"CurrentCellID\" nor \"RecentDownloadRate\" found in config.");
 
-                // Find the closing brace directly before "CurrentCellID"
+                // Find the closing brace directly before the target line
                 int insertIndex = -1;
-                for (int i = currentCellLine - 1; i >= 0; i--)
+                for (int i = targetLine - 1; i >= 0; i--)
                 {
                         if (lines[i].Trim() == "}")
                         {
@@ -640,7 +648,7 @@ public MainForm()
                         }
                 }
                 if (insertIndex == -1)
-                        throw new InvalidOperationException("Could not find closing brace before CurrentCellID.");
+                        throw new InvalidOperationException($"Could not find closing brace before {searchedFor}.");
 
                 // Detect proper indent from last AppID
                 string indent = "";
@@ -677,41 +685,41 @@ public MainForm()
                 }));
                 File.WriteAllLines(configPath, lines);
 
-				// Step 6: Create AppID files
-				BeginInvoke(new Action(() => {
-					UpdateStatus("Creating AppID files...");
-					progressBar.Value = 6;
-				}));
+                // Step 6: Create AppID files
+                BeginInvoke(new Action(() => {
+                        UpdateStatus("Creating AppID files...");
+                        progressBar.Value = 6;
+                }));
 
-				var createdFiles = new List<string>();
+                var createdFiles = new List<string>();
 
-				// Get game name from the .lua file name (e.g., 1593500.lua)
-				string luaFileName = Path.GetFileNameWithoutExtension(luaFile);
-				string gameName = GetGameNameFromSteamDB(luaFileName);
+                // Get game name from the .lua file name (e.g., 1593500.lua)
+                string luaFileName = Path.GetFileNameWithoutExtension(luaFile);
+                string gameName = GetGameNameFromSteamDB(luaFileName);
 
-				foreach (var entry in entries)
-				{
-					string txtPath = GetNextAvailableTxtPath(appListFolder);
-					File.WriteAllText(txtPath, $"{entry.AppId} - {gameName}");
-					createdFiles.Add(Path.GetFileName(txtPath));
-				}
+                foreach (var entry in entries)
+                {
+                        string txtPath = GetNextAvailableTxtPath(appListFolder);
+                        File.WriteAllText(txtPath, $"{entry.AppId} - {gameName}");
+                        createdFiles.Add(Path.GetFileName(txtPath));
+                }
 
-				// Also create one file that just stores the Lua filename
-				string luaNameTxtPath = GetNextAvailableTxtPath(appListFolder);
-				File.WriteAllText(luaNameTxtPath, $"{luaFileName} - {gameName}");
-				createdFiles.Add(Path.GetFileName(luaNameTxtPath));
+                // Also create one file that just stores the Lua filename
+                string luaNameTxtPath = GetNextAvailableTxtPath(appListFolder);
+                File.WriteAllText(luaNameTxtPath, $"{luaFileName} - {gameName}");
+                createdFiles.Add(Path.GetFileName(luaNameTxtPath));
 
-				SaveSettings();
+                SaveSettings();
 
-				var successMsg = $"Successfully processed {entries.Count} app entries!\n\n" +
-					$"Backup created: {Path.GetFileName(backupPath)}\n" +
-					$"AppID files created: {string.Join(", ", createdFiles.Take(5))}" +
-					(createdFiles.Count > 5 ? $" and {createdFiles.Count - 5} more..." : "");
+                var successMsg = $"Successfully processed {entries.Count} app entries!\n\n" +
+                        $"Backup created: {Path.GetFileName(backupPath)}\n" +
+                        $"AppID files created: {string.Join(", ", createdFiles.Take(5))}" +
+                        (createdFiles.Count > 5 ? $" and {createdFiles.Count - 5} more..." : "");
 
-				BeginInvoke(new Action(() => {
-					MessageBox.Show(successMsg, "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
-					UpdateStatus("Operation completed successfully");
-				}));
+                BeginInvoke(new Action(() => {
+                        MessageBox.Show(successMsg, "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        UpdateStatus("Operation completed successfully");
+                }));
         }
 
         
