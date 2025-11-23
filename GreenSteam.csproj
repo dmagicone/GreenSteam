@@ -12,8 +12,8 @@
     <AssemblyDescription>Steam config.vdf editor for managing decryption keys</AssemblyDescription>
     <AssemblyCompany>YourCompany</AssemblyCompany>
     <AssemblyProduct>Steam Config Editor</AssemblyProduct>
-    <AssemblyVersion>1.0.0.0</AssemblyVersion>
-    <FileVersion>1.0.0.0</FileVersion>
+    <AssemblyVersion>1.0.1.0</AssemblyVersion>
+    <FileVersion>1.0.1.0</FileVersion>
     
     <!-- Icon (place your icon.ico in the project root) -->
     <ApplicationIcon>icon.ico</ApplicationIcon>
