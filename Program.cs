@@ -10,9 +10,9 @@ using System.Drawing;
 using System.Threading.Tasks;
 using System.Net.Http;
 using System.Net;
-using System.IO;
 using System.Reflection;
 using Guna.UI2.WinForms.Enums;
+using System.IO.Compression; // ADDED: Required for ZipFile and ZipArchive
 
 
 namespace GreenSteam
@@ -28,7 +28,7 @@ namespace GreenSteam
         private Guna2Button steamBrowseButton;
         private Guna2Button luaBrowseButton;
         private Guna2Button appListBrowseButton;
-        private Guna2Button validateButton; // ✅ Updated
+        private Guna2Button validateButton;
         private Guna2Button previewButton;
         private Guna2Button applyButton;
         private Guna.UI2.WinForms.Guna2ProgressBar progressBar;
@@ -236,7 +236,8 @@ public MainForm()
             // Lua Folder
             var luaLabel = new Label
             {
-                Text = "Folder Containing Lua + Manifest Files:",
+                // UPDATED text to reflect new functionality
+                Text = "Folder or Zip Containing Lua + Manifest Files:", 
                 AutoSize = true,
                 Anchor = AnchorStyles.Left
             };
@@ -245,9 +246,14 @@ public MainForm()
             luaFolderTextBox = new TextBox
             {
                 Dock = DockStyle.Top,
-                Anchor = AnchorStyles.Left | AnchorStyles.Right
+                Anchor = AnchorStyles.Left | AnchorStyles.Right,
+                AllowDrop = true // NEW: Enable drag and drop
             };
             mainPanel.Controls.Add(luaFolderTextBox, 1, row);
+            
+            // NEW: Wire up drag-and-drop events
+            luaFolderTextBox.DragEnter += LuaFolderTextBox_DragEnter;
+            luaFolderTextBox.DragDrop += LuaFolderTextBox_DragDrop;
             
             luaBrowseButton = new Guna2Button
             {
@@ -338,15 +344,6 @@ public MainForm()
 			row++;
 
             // Progress bar
-            //progressBar = new Guna2ProgressBar
-            //{
-            //    Dock = DockStyle.Top,
-            //    Visible = false
-            //};
-            //mainPanel.Controls.Add(progressBar, 0, row);
-            //mainPanel.SetColumnSpan(progressBar, 3);
-            //row++;
-			
 			progressBar = new Guna2ProgressBar
 			{
 				Text = "",
@@ -399,17 +396,73 @@ public MainForm()
             }
         }
         
+        // MODIFIED: This method now uses the new custom dialog for selection
         private void LuaBrowseButton_Click(object sender, EventArgs e)
         {
-            using (var dialog = new FolderBrowserDialog())
+            using (var selector = new SourceSelectionDialog())
             {
-                dialog.Description = "Select Folder with Lua + Manifest Files";
-                dialog.SelectedPath = luaFolderTextBox.Text;
-                
-                if (dialog.ShowDialog() == DialogResult.OK)
+                DialogResult result = selector.ShowDialog();
+
+                if (result == DialogResult.OK) // Folder selected (mapped to DialogResult.OK in custom dialog)
                 {
-                    luaFolderTextBox.Text = dialog.SelectedPath;
+                    using (var folderDialog = new FolderBrowserDialog())
+                    {
+                        folderDialog.Description = "Select Folder with Lua + Manifest Files";
+                        folderDialog.SelectedPath = luaFolderTextBox.Text;
+                        if (folderDialog.ShowDialog() == DialogResult.OK)
+                        {
+                            luaFolderTextBox.Text = folderDialog.SelectedPath;
+                        }
+                    }
                 }
+                else if (result == DialogResult.Yes) // Zip File selected (mapped to DialogResult.Yes in custom dialog)
+                {
+                    using (var fileDialog = new OpenFileDialog())
+                    {
+                        fileDialog.Title = "Select Zip File (.zip) containing Lua + Manifest Files";
+                        // Filter specifically for .zip files
+                        fileDialog.Filter = "Zip Files (*.zip)|*.zip|All files (*.*)|*.*";
+                        if (fileDialog.ShowDialog() == DialogResult.OK)
+                        {
+                            luaFolderTextBox.Text = fileDialog.FileName;
+                        }
+                    }
+                }
+                // If DialogResult.Cancel is returned, do nothing.
+            }
+        }
+        
+        // NEW: DragEnter handler for the Lua text box
+        private void LuaFolderTextBox_DragEnter(object sender, DragEventArgs e)
+        {
+            // Check if the data being dragged is a file or folder path
+            if (e.Data.GetDataPresent(DataFormats.FileDrop))
+            {
+                // Get the first path
+                string[] paths = (string[])e.Data.GetData(DataFormats.FileDrop);
+                if (paths != null && paths.Length > 0)
+                {
+                    string path = paths[0];
+                    // Check if it's a folder or a .zip file
+                    if (Directory.Exists(path) || (File.Exists(path) && Path.GetExtension(path).Equals(".zip", StringComparison.OrdinalIgnoreCase)))
+                    {
+                        e.Effect = DragDropEffects.Copy; // Show copy cursor
+                        return;
+                    }
+                }
+            }
+            e.Effect = DragDropEffects.None; // Show no-drop cursor
+        }
+
+        // NEW: DragDrop handler for the Lua text box
+        private void LuaFolderTextBox_DragDrop(object sender, DragEventArgs e)
+        {
+            // Get the dragged paths
+            string[] paths = (string[])e.Data.GetData(DataFormats.FileDrop);
+            if (paths != null && paths.Length > 0)
+            {
+                // Set the TextBox text to the path of the first dragged item
+                luaFolderTextBox.Text = paths[0];
             }
         }
         
@@ -446,6 +499,7 @@ public MainForm()
         private void ValidateButton_Click(object sender, EventArgs e)
         {
             var errors = new List<string>();
+            var luaPath = luaFolderTextBox.Text;
             
             // Validate Steam path
             if (string.IsNullOrWhiteSpace(steamPathTextBox.Text))
@@ -455,20 +509,28 @@ public MainForm()
             else if (!ValidateSteamPath(steamPathTextBox.Text))
                 errors.Add("Invalid Steam installation folder");
             
-            // Validate Lua folder
-            if (string.IsNullOrWhiteSpace(luaFolderTextBox.Text))
-                errors.Add("Lua folder not selected");
-            else if (!Directory.Exists(luaFolderTextBox.Text))
-                errors.Add("Lua folder does not exist");
+            // Validate Lua folder/zip (LOGIC RESTORED for zip support)
+            bool isDirectory = Directory.Exists(luaPath);
+            bool isZipFile = File.Exists(luaPath) && Path.GetExtension(luaPath).Equals(".zip", StringComparison.OrdinalIgnoreCase);
+
+            if (string.IsNullOrWhiteSpace(luaPath))
+                errors.Add("Lua folder/zip not selected");
+            else if (!isDirectory && !isZipFile)
+                errors.Add("Lua folder/zip path does not exist or is not a folder/zip");
             else
             {
                 try
                 {
-                    FindFirstLuaFile(luaFolderTextBox.Text);
+                    // Try to find the Lua file within the folder or zip
+                    FindFirstLuaFileContent(luaPath); 
                 }
                 catch (FileNotFoundException)
                 {
-                    errors.Add("No .lua files found in selected folder");
+                    errors.Add($"No .lua file found in selected {(isZipFile ? "zip file" : "folder")}");
+                }
+                catch (Exception ex) when (ex is InvalidDataException || ex is IOException)
+                {
+                    if(isZipFile) errors.Add($"File is not a valid zip archive: {luaPath}");
                 }
             }
             
@@ -505,10 +567,11 @@ public MainForm()
             
             try
             {
-                var luaFile = FindFirstLuaFile(luaFolderTextBox.Text);
-                var entries = ExtractAllAddAppIdValues(luaFile);
+                // LOGIC RESTORED: Get content and filename from folder/zip
+                var (luaContent, luaFileName) = FindFirstLuaFileContent(luaFolderTextBox.Text); 
+                var entries = ExtractAllAddAppIdValues(luaContent); // Pass content
                 
-                var previewText = $"Found {entries.Count} app entries in {Path.GetFileName(luaFile)}:\n\n";
+                var previewText = $"Found {entries.Count} app entries in {luaFileName}:\n\n";
                 
                 var displayEntries = entries.Take(10).ToList();
                 foreach (var entry in displayEntries)
@@ -519,8 +582,8 @@ public MainForm()
                 if (entries.Count > 10)
                     previewText += $"\n... and {entries.Count - 10} more entries";
                 
-                // Count manifest files
-                var manifestCount = Directory.GetFiles(luaFolderTextBox.Text, "*.manifest").Length;
+                // Count manifest files (LOGIC RESTORED for zip support)
+                var manifestCount = GetManifestFileCount(luaFolderTextBox.Text);
                 previewText += $"\n\nManifest files to copy: {manifestCount}";
                 
                 MessageBox.Show(previewText, "Preview Changes", MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -571,11 +634,18 @@ public MainForm()
         private bool ValidatePaths()
         {
             var errors = new List<string>();
-            
+            var luaPath = luaFolderTextBox.Text; // Use local variable for cleanliness
+
             if (string.IsNullOrWhiteSpace(steamPathTextBox.Text) || !Directory.Exists(steamPathTextBox.Text))
                 errors.Add("Invalid Steam folder");
-            if (string.IsNullOrWhiteSpace(luaFolderTextBox.Text) || !Directory.Exists(luaFolderTextBox.Text))
-                errors.Add("Invalid Lua folder");
+            
+            // Check if luaFolderTextBox.Text is a directory OR a zip file (LOGIC RESTORED for zip support)
+            bool isDirectory = Directory.Exists(luaPath);
+            bool isZipFile = File.Exists(luaPath) && Path.GetExtension(luaPath).Equals(".zip", StringComparison.OrdinalIgnoreCase);
+            
+            if (string.IsNullOrWhiteSpace(luaPath) || (!isDirectory && !isZipFile))
+                errors.Add("Invalid Lua folder/zip path (must be a folder or a .zip file)");
+            
             if (string.IsNullOrWhiteSpace(appListPathTextBox.Text) || !Directory.Exists(appListPathTextBox.Text))
                 errors.Add("Invalid AppList folder");
             
@@ -595,20 +665,21 @@ public MainForm()
                 var appListFolder = appListPathTextBox.Text;
                 var configPath = Path.Combine(steamFolder, "config", "config.vdf");
 
-                // Step 1: Copy manifest files
+                // Step 1: Copy manifest files (LOGIC RESTORED for zip support)
                 BeginInvoke(new Action(() => {
                         UpdateStatus("Copying manifest files...");
                         progressBar.Value = 1;
                 }));
                 CopyManifestFiles(luaFolder, steamFolder);
 
-                // Step 2: Parse Lua file
+                // Step 2: Parse Lua file (LOGIC RESTORED for zip support)
                 BeginInvoke(new Action(() => {
                         UpdateStatus("Parsing Lua file...");
                         progressBar.Value = 2;
                 }));
-                var luaFile = FindFirstLuaFile(luaFolder);
-                var entries = ExtractAllAddAppIdValues(luaFile);
+                var (luaContent, luaFileName) = FindFirstLuaFileContent(luaFolder);
+                var entries = ExtractAllAddAppIdValues(luaContent); // Pass content
+                string baseLuaFileName = Path.GetFileNameWithoutExtension(luaFileName); // Get name for SteamDB call
 
                 // Step 3: Create backup
                 BeginInvoke(new Action(() => {
@@ -694,8 +765,7 @@ public MainForm()
                 var createdFiles = new List<string>();
 
                 // Get game name from the .lua file name (e.g., 1593500.lua)
-                string luaFileName = Path.GetFileNameWithoutExtension(luaFile);
-                string gameName = GetGameNameFromSteamDB(luaFileName);
+                string gameName = GetGameNameFromSteamDB(baseLuaFileName); // Use the correct variable
 
                 foreach (var entry in entries)
                 {
@@ -706,7 +776,7 @@ public MainForm()
 
                 // Also create one file that just stores the Lua filename
                 string luaNameTxtPath = GetNextAvailableTxtPath(appListFolder);
-                File.WriteAllText(luaNameTxtPath, $"{luaFileName} - {gameName}");
+                File.WriteAllText(luaNameTxtPath, $"{baseLuaFileName} - {gameName}");
                 createdFiles.Add(Path.GetFileName(luaNameTxtPath));
 
                 SaveSettings();
@@ -723,17 +793,46 @@ public MainForm()
         }
 
         
-        private string FindFirstLuaFile(string folder)
+        // RESTORED: Finds first .lua file and returns its content and file name, handling zip files
+        private (string content, string fileName) FindFirstLuaFileContent(string path)
         {
-            var luaFiles = Directory.GetFiles(folder, "*.lua");
-            if (luaFiles.Length == 0)
-                throw new FileNotFoundException("No .lua file found in selected folder.");
-            return luaFiles[0];
+            // 1. Check if the path is a ZIP file
+            if (File.Exists(path) && Path.GetExtension(path).Equals(".zip", StringComparison.OrdinalIgnoreCase))
+            {
+                using (ZipArchive archive = ZipFile.OpenRead(path))
+                {
+                    // Find the first .lua entry in the zip archive
+                    var luaEntry = archive.Entries
+                        .FirstOrDefault(e => e.FullName.EndsWith(".lua", StringComparison.OrdinalIgnoreCase));
+
+                    if (luaEntry == null)
+                        throw new FileNotFoundException($"No .lua file found in the zip archive: {path}");
+
+                    using (var stream = luaEntry.Open())
+                    using (var reader = new StreamReader(stream))
+                    {
+                        // Read content without extraction
+                        return (reader.ReadToEnd(), luaEntry.FullName); 
+                    }
+                }
+            }
+            // 2. Otherwise, treat as a regular directory
+            else if (Directory.Exists(path))
+            {
+                var luaFiles = Directory.GetFiles(path, "*.lua", SearchOption.TopDirectoryOnly);
+                if (luaFiles.Length == 0)
+                    throw new FileNotFoundException($"No .lua file found in selected folder: {path}");
+                    
+                var luaPath = luaFiles[0];
+                return (File.ReadAllText(luaPath), Path.GetFileName(luaPath));
+            }
+            
+            throw new DirectoryNotFoundException($"Path is neither a valid directory nor a zip file: {path}");
         }
-        
-        private List<AppEntry> ExtractAllAddAppIdValues(string luaPath)
+
+        // RESTORED/MODIFIED: Now accepts the content as a string
+        private List<AppEntry> ExtractAllAddAppIdValues(string content)
         {
-            var content = File.ReadAllText(luaPath);
             var pattern = @"addappid\s*\(\s*(\d+)\s*,\s*[01]\s*,\s*[""']([a-fA-F0-9]{64})[""']\s*\)";
             var matches = Regex.Matches(content, pattern, RegexOptions.IgnoreCase);
             
@@ -754,19 +853,59 @@ public MainForm()
             return backupPath;
         }
         
-        private void CopyManifestFiles(string sourceFolder, string steamFolder)
+        // RESTORED: Handles both folder and zip file as a source for manifest files
+        private void CopyManifestFiles(string sourcePath, string steamFolder)
         {
             var depotCacheFolder = Path.Combine(steamFolder, "depotcache");
             Directory.CreateDirectory(depotCacheFolder);
             
-            var manifestFiles = Directory.GetFiles(sourceFolder, "*.manifest");
-            foreach (var manifestFile in manifestFiles)
+            // 1. Check if path is a ZIP file
+            if (File.Exists(sourcePath) && Path.GetExtension(sourcePath).Equals(".zip", StringComparison.OrdinalIgnoreCase))
             {
-                var destFile = Path.Combine(depotCacheFolder, Path.GetFileName(manifestFile));
-                File.Copy(manifestFile, destFile, true);
+                using (ZipArchive archive = ZipFile.OpenRead(sourcePath))
+                {
+                    foreach (ZipArchiveEntry entry in archive.Entries)
+                    {
+                        // Check if the entry is a manifest file
+                        if (entry.FullName.EndsWith(".manifest", StringComparison.OrdinalIgnoreCase))
+                        {
+                            var destFile = Path.Combine(depotCacheFolder, Path.GetFileName(entry.FullName));
+                            
+                            // ExtractToFile allows copying the stream directly to a file
+                            entry.ExtractToFile(destFile, overwrite: true);
+                        }
+                    }
+                }
+            }
+            // 2. Otherwise, treat as a regular directory
+            else if (Directory.Exists(sourcePath))
+            {
+                var manifestFiles = Directory.GetFiles(sourcePath, "*.manifest");
+                foreach (var manifestFile in manifestFiles)
+                {
+                    var destFile = Path.Combine(depotCacheFolder, Path.GetFileName(manifestFile));
+                    File.Copy(manifestFile, destFile, true);
+                }
             }
         }
         
+        // RESTORED: Helper method to count manifest files for preview logic
+        private int GetManifestFileCount(string sourcePath)
+        {
+            if (File.Exists(sourcePath) && Path.GetExtension(sourcePath).Equals(".zip", StringComparison.OrdinalIgnoreCase))
+            {
+                using (ZipArchive archive = ZipFile.OpenRead(sourcePath))
+                {
+                    return archive.Entries.Count(e => e.FullName.EndsWith(".manifest", StringComparison.OrdinalIgnoreCase));
+                }
+            }
+            else if (Directory.Exists(sourcePath))
+            {
+                return Directory.GetFiles(sourcePath, "*.manifest").Length;
+            }
+            return 0;
+        }
+
         private string DetectIndentation(List<string> lines, int index)
         {
             if (index < 0 || index >= lines.Count)
@@ -839,6 +978,77 @@ public MainForm()
         {
             public string AppId { get; set; }
             public string Key { get; set; }
+        }
+    }
+
+    // NEW CUSTOM DIALOG FORM (RESTORED and FIXED)
+    public class SourceSelectionDialog : Form
+    {
+        public SourceSelectionDialog()
+        {
+            this.Text = "Select Source Type";
+            this.FormBorderStyle = FormBorderStyle.FixedDialog;
+            this.StartPosition = FormStartPosition.CenterParent;
+            this.MaximizeBox = false;
+            this.MinimizeBox = false;
+            this.Size = new Size(350, 150);
+            
+            this.BackColor = Color.White;
+            this.ControlBox = false; // Hide default window controls
+
+            var promptLabel = new Label
+            {
+                Text = "Choose the source type for Lua and Manifest files:",
+                Location = new Point(10, 20),
+                AutoSize = true,
+                Font = new Font("Segoe UI", 9.75f, FontStyle.Regular),
+            };
+
+            var folderButton = new Guna2Button
+            {
+                Text = "Folder",
+                Location = new Point(20, 60),
+                Size = new Size(95, 30),
+                FillColor = Color.Teal,
+                ForeColor = Color.White,
+                Font = new Font("Segoe UI", 9.75f, FontStyle.Bold),
+            };
+            // FIX: Add explicit click handler for Folder button
+            folderButton.Click += (sender, e) => { this.DialogResult = DialogResult.OK; this.Close(); };
+
+
+            var zipButton = new Guna2Button
+            {
+                Text = "Zip File",
+                Location = new Point(125, 60),
+                Size = new Size(95, 30),
+                FillColor = Color.MediumSlateBlue,
+                ForeColor = Color.White,
+                Font = new Font("Segoe UI", 9.75f, FontStyle.Bold),
+            };
+            // FIX: Add explicit click handler for Zip File button
+            zipButton.Click += (sender, e) => { this.DialogResult = DialogResult.Yes; this.Close(); };
+
+            var cancelButton = new Guna2Button
+            {
+                Text = "Cancel",
+                Location = new Point(230, 60),
+                Size = new Size(95, 30),
+                FillColor = Color.Gray,
+                ForeColor = Color.White,
+                Font = new Font("Segoe UI", 9.75f, FontStyle.Bold),
+            };
+            // FIX: Add explicit click handler to ensure Cancel button closes the dialog
+            cancelButton.Click += (sender, e) => { this.DialogResult = DialogResult.Cancel; this.Close(); };
+
+
+            this.Controls.Add(promptLabel);
+            this.Controls.Add(folderButton);
+            this.Controls.Add(zipButton);
+            this.Controls.Add(cancelButton);
+
+            this.AcceptButton = folderButton;
+            this.CancelButton = cancelButton;
         }
     }
     
