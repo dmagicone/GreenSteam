@@ -9,6 +9,8 @@ The app remembers the location you specify for the Steam and Applist folders. Yo
 > [!IMPORTANT]
 ${\color{green}MAKE \space SURE \space THE \space FOLDER \space OR \space ZIP \space FILE \space CONTAINS \space THE \space LUA \space AND \space MANIFEST \space FILES.}$
 
+${\color{yellow}Make sure the name of the greensteam app is "Greensteam..exe". Greenluma thinks steam is running if anything has the name *steam.exe }$
+
 This app assumes you have GreemLuma already installed and know how to install from the console prompt.
 
 The code was mostly done with the help of AI. 
