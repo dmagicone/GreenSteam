@@ -7,8 +7,7 @@ It adds the mani files to the depot folder and the needed files to the applist f
 The app remembers the location you specify for the Steam and Applist folders. You only have to specify the folder or zip file containing the lua + mani files each launch.
 
 > [!IMPORTANT]
-${\color{green}MAKE \space SURE \space THE \space FOLDER \space OR \space ZIP \space FILE \space CONTAINS \space THE \space LUA \space AND \space MANIFEST \space FILES.
-> Also make sure the name of the Greensteam..exe does have two dots before exe. Greenluma thinks steam is running if anything has the name steam.exe }$
+${\color{green}MAKE \space SURE \space THE \space FOLDER \space OR \space ZIP \space FILE \space CONTAINS \space THE \space LUA \space AND \space MANIFEST \space FILES.}$
 
 This app assumes you have GreemLuma already installed and know how to install from the console prompt.
 
