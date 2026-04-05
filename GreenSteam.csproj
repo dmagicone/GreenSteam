@@ -19,14 +19,13 @@
     <!-- Icon (place your icon.ico in the project root) -->
     <ApplicationIcon>icon.ico</ApplicationIcon>
     
-    <!-- Single file executable -->
+    <!-- Single File Publishing -->
     <PublishSingleFile>true</PublishSingleFile>
     <SelfContained>true</SelfContained>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <PublishReadyToRun>true</PublishReadyToRun>
-	<EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
-	<IncludeAllContentForSelfExtract>true</IncludeAllContentForSelfExtract>
-    <PublishTrimmed>false</PublishTrimmed>
+    <ApplicationIcon>icon.ico</ApplicationIcon>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
   </PropertyGroup>
 
   <!-- Include icon file -->
