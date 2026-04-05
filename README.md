@@ -14,6 +14,7 @@ ${\color{yellow}Make \space sure \space the \space name \space of \space the \sp
 This app assumes you have GreemLuma already installed and know how to install from the console prompt.
 
 The code was mostly done with the help of AI. 
+
 Needs .NET6 to run
 
 ![image](https://github.com/user-attachments/assets/2aff7e0e-7ff4-42db-bd2c-65d78bc3255c)
