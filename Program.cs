@@ -24,20 +24,20 @@ namespace GreenSteam
     {
         private const string SETTINGS_FILE = "settings.json";
 
-		private TextBox steamPathTextBox = null!;
-        private TextBox luaFolderTextBox = null!;
-        private TextBox appListPathTextBox = null!;
-        private Guna2Button steamBrowseButton = null!;
-        private Guna2Button luaBrowseButton = null!;
-        private Guna2Button appListBrowseButton = null!;
-        private Guna2Button validateButton = null!;
-        private Guna2Button previewButton = null!;
-        private Guna2Button applyButton = null!;
-        private Guna2Button installButton = null!; 
-        private Guna.UI2.WinForms.Guna2ProgressBar progressBar = null!;
-        private Label statusLabel = null!;
-        private Label attentionLabel = null!; 
-        private TableLayoutPanel mainPanel = null!;
+        private TextBox steamPathTextBox;
+        private TextBox luaFolderTextBox;
+        private TextBox appListPathTextBox;
+        private Guna2Button steamBrowseButton;
+        private Guna2Button luaBrowseButton;
+        private Guna2Button appListBrowseButton;
+        private Guna2Button validateButton;
+        private Guna2Button previewButton;
+        private Guna2Button applyButton;
+        private Guna2Button installButton; 
+        private Guna.UI2.WinForms.Guna2ProgressBar progressBar;
+		private Label statusLabel;
+        private Label attentionLabel; 
+		private TableLayoutPanel mainPanel;
 
         [DllImport("user32.dll")]
         private static extern bool SetForegroundWindow(IntPtr hWnd);
@@ -96,55 +96,48 @@ namespace GreenSteam
             public string SteamFolder { get; set; } = "";
             public string AppListFolder { get; set; } = "";
         }
-		
-		
-		public MainForm()
-		{
-			InitializeComponent();
 
-			// 1. Set the icon for the taskbar
-			try
-			{
-				var myAssembly = Assembly.GetExecutingAssembly();
-				var resourceNames = myAssembly.GetManifestResourceNames();
-				string? iconResource = resourceNames.FirstOrDefault(r => r.EndsWith(".ico"));
-
-				if (iconResource != null)
-				{
-					using (var stream = myAssembly.GetManifestResourceStream(iconResource))
-					{
-						if (stream != null) this.Icon = new Icon(stream);
-					}
-				}
-			}
-			catch 
-			{ 
-				// Fallback if icon missing
-			}
-
-			// 2. Setup UI Enhancements
-			new Guna2BorderlessForm { ContainerControl = this, BorderRadius = 20, DragForm = false };
-			var dragControl = new Guna2DragControl { TargetControl = mainPanel };
-			
-			var closeButton = new Guna2ControlBox { Anchor = AnchorStyles.Top | AnchorStyles.Right, Location = new Point(this.Width - 65, 10), FillColor = Color.Red, Size = new Size(35, 15) };
-			var minimizeButton = new Guna2ControlBox { ControlBoxType = ControlBoxType.MinimizeBox, Anchor = AnchorStyles.Top | AnchorStyles.Right, Location = new Point(this.Width - 100, 10), FillColor = Color.Gray, Size = new Size(35, 15) };
-			
-			this.Controls.Add(minimizeButton);
-			this.Controls.Add(closeButton);
-
-			// 3. Set Background Image
-			var assembly = Assembly.GetExecutingAssembly();
-			using (Stream? stream = assembly.GetManifestResourceStream("GreenSteam.background.png")) 
-			{
-				if (stream != null) this.BackgroundImage = Image.FromStream(stream);
-			}
-
-			this.BackgroundImageLayout = ImageLayout.Stretch;
-			minimizeButton.BringToFront();
-			closeButton.BringToFront();
-			
-			LoadSettings();
-		}
+        public MainForm()
+        {
+            InitializeComponent();
+            new Guna2BorderlessForm { ContainerControl = this, BorderRadius = 20, DragForm = false };
+            var dragControl = new Guna2DragControl { TargetControl = mainPanel };
+            var closeButton = new Guna2ControlBox { Anchor = AnchorStyles.Top | AnchorStyles.Right, Location = new Point(this.Width - 65, 10), FillColor = Color.Red, Size = new Size(35, 15) };
+            var minimizeButton = new Guna2ControlBox { ControlBoxType = ControlBoxType.MinimizeBox, Anchor = AnchorStyles.Top | AnchorStyles.Right, Location = new Point(this.Width - 100, 10), FillColor = Color.Gray, Size = new Size(35, 15) };
+            this.Controls.Add(minimizeButton);
+            this.Controls.Add(closeButton);
+            var assembly = Assembly.GetExecutingAssembly();
+            using (Stream stream = assembly.GetManifestResourceStream("GreenSteam.background.png")) {
+                if (stream != null) this.BackgroundImage = Image.FromStream(stream);
+            }
+            this.BackgroundImageLayout = ImageLayout.Stretch;
+            
+            // Set the icon for the taskbar from embedded resource
+            try
+            {
+                var resourceNames = assembly.GetManifestResourceNames();
+                // Try to find the icon resource
+                string iconResource = resourceNames.FirstOrDefault(r => r.EndsWith(".ico"));
+                if (iconResource != null)
+                {
+                    using (var stream = assembly.GetManifestResourceStream(iconResource))
+                    {
+                        if (stream != null)
+                        {
+                            this.Icon = new Icon(stream);
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                // Icon load failed, use default
+            }
+            
+            minimizeButton.BringToFront();
+            closeButton.BringToFront();
+            LoadSettings();
+        }
         
         private void InitializeComponent()
         {
@@ -220,8 +213,6 @@ namespace GreenSteam
 
             this.Controls.Add(mainPanel);
         }
-		
-		
         
         private void UpdateStatus(string message) { statusLabel.Text = message; }
         private void SteamBrowseButton_Click(object sender, EventArgs e) { using (var d = new FolderBrowserDialog()) if (d.ShowDialog() == DialogResult.OK) steamPathTextBox.Text = d.SelectedPath; }
@@ -389,7 +380,10 @@ namespace GreenSteam
                 string txtPath = GetNextAvailableTxtPath(appListFolder);
                 File.WriteAllText(txtPath, $"{entry.AppId} - {gameName}");
             }
-            File.WriteAllText(GetNextAvailableTxtPath(appListFolder), $"{baseLuaFileName} - {gameName}");
+            // Only create the base lua filename entry if it's not already in the entries list
+            if (!entries.Any(e => e.AppId == baseLuaFileName)) {
+                File.WriteAllText(GetNextAvailableTxtPath(appListFolder), $"{baseLuaFileName} - {gameName}");
+            }
 
             BeginInvoke(new Action(() => { UpdateStatus("Creating ACF file..."); progressBar.Value = 7; }));
             CreateAcfFile(steamFolder, baseLuaFileName, gameName);
