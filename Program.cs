@@ -36,6 +36,7 @@ namespace GreenSteam
         private Guna2Button installButton; 
         private Guna.UI2.WinForms.Guna2ProgressBar progressBar;
 		private Label statusLabel;
+        private Label gameNameLabel;
         private Label attentionLabel; 
 		private TableLayoutPanel mainPanel;
 
@@ -92,6 +93,58 @@ namespace GreenSteam
 			return "Unknown Game";
 		}
 
+		private string GetInstallDirFromSteamDB(string appId)
+		{
+			try {
+				using (var client = new HttpClient()) {
+					client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64)");
+					client.Timeout = TimeSpan.FromSeconds(25);
+					
+					// Use api.steamcmd.net to get install directory
+					string url = $"https://api.steamcmd.net/v1/info/{appId}";
+					string json = client.GetStringAsync(url).Result;
+					
+					using (JsonDocument doc = JsonDocument.Parse(json)) {
+						var root = doc.RootElement;
+						
+						// Check status
+						if (root.TryGetProperty("status", out var statusProp) && statusProp.GetString() == "success") {
+							if (root.TryGetProperty("data", out var dataNode) && dataNode.TryGetProperty(appId, out var appData)) {
+								// Try to get install directory from config.installdir
+								if (appData.TryGetProperty("config", out var configNode) && 
+								    configNode.TryGetProperty("installdir", out var installDirProp)) {
+									string installDir = installDirProp.GetString();
+									if (!string.IsNullOrWhiteSpace(installDir)) {
+										return installDir;
+									}
+								}
+							}
+						}
+					}
+				}
+			} catch { }
+			
+			// Fallback to getting game name from Steam API
+			try {
+				using (var client = new HttpClient()) {
+					client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64)");
+					string url = $"https://store.steampowered.com/api/appdetails?appids={appId}";
+					string json = client.GetStringAsync(url).Result;
+					using (JsonDocument doc = JsonDocument.Parse(json)) {
+						var root = doc.RootElement;
+						var appData = root.GetProperty(appId);
+						if (appData.GetProperty("success").GetBoolean()) {
+							var data = appData.GetProperty("data");
+							string gameName = data.GetProperty("name").GetString() ?? "game";
+							return gameName;
+						}
+					}
+				}
+			} catch { }
+			
+			return "game";
+		}
+
         public class Settings {
             public string SteamFolder { get; set; } = "";
             public string AppListFolder { get; set; } = "";
@@ -146,11 +199,11 @@ namespace GreenSteam
             this.FormBorderStyle = FormBorderStyle.None;
             this.StartPosition = FormStartPosition.CenterScreen;
 			int row = 0;
-            mainPanel = new TableLayoutPanel { Dock = DockStyle.Top, Padding = new Padding(40), ColumnCount = 3, RowCount = 7, AutoSize = true, BackColor = Color.Transparent };
+            mainPanel = new TableLayoutPanel { Dock = DockStyle.Top, Padding = new Padding(40), ColumnCount = 3, RowCount = 8, AutoSize = true, BackColor = Color.Transparent };
             mainPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             mainPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             mainPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-            for (int i = 0; i < 7; i++) mainPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            for (int i = 0; i < 8; i++) mainPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
             mainPanel.Controls.Add(new Label { Text = "Steam Folder:", AutoSize = true, Anchor = AnchorStyles.Left, ForeColor = Color.White }, 0, row);
             steamPathTextBox = new TextBox { Dock = DockStyle.Top, Anchor = AnchorStyles.Left | AnchorStyles.Right };
@@ -182,7 +235,7 @@ namespace GreenSteam
             previewButton.Click += PreviewButton_Click;
 			applyButton = new Guna2Button { Text = "Apply Changes", FillColor = Color.ForestGreen, AutoSize = true, Margin = new Padding(0, 0, 10, 0) };
             applyButton.Click += ApplyButton_Click;
-            installButton = new Guna2Button { Text = "Open Steam Console & Install", FillColor = Color.DarkOrange, AutoSize = true, Margin = new Padding(10, 0, 0, 0) };
+            installButton = new Guna2Button { Text = "Launch Steam GL Install", FillColor = Color.DarkOrange, AutoSize = true, Margin = new Padding(10, 0, 0, 0), Enabled = false };
             installButton.Click += InstallButton_Click;
 
 			buttonPanel.Controls.AddRange(new Control[] { validateButton, previewButton, applyButton, installButton });
@@ -198,6 +251,19 @@ namespace GreenSteam
             statusLabel = new Label { Text = "Ready", AutoSize = true, Anchor = AnchorStyles.Left, ForeColor = Color.LimeGreen };
             mainPanel.Controls.Add(statusLabel, 0, row);
             mainPanel.SetColumnSpan(statusLabel, 3);
+            row++;
+
+            gameNameLabel = new Label { 
+                Text = "", 
+                AutoSize = true, 
+                Anchor = AnchorStyles.Top,
+                ForeColor = Color.Orange, 
+                Font = new Font("Segoe UI", 11f, FontStyle.Bold),
+                Visible = false,
+                TextAlign = ContentAlignment.MiddleCenter
+            };
+            mainPanel.Controls.Add(gameNameLabel, 0, row);
+            mainPanel.SetColumnSpan(gameNameLabel, 3);
             row++;
 
             attentionLabel = new Label { 
@@ -219,14 +285,52 @@ namespace GreenSteam
         private void LuaBrowseButton_Click(object sender, EventArgs e) {
             using (var selector = new SourceSelectionDialog()) {
                 DialogResult result = selector.ShowDialog();
-                if (result == DialogResult.OK) { using (var d = new FolderBrowserDialog()) if (d.ShowDialog() == DialogResult.OK) luaFolderTextBox.Text = d.SelectedPath; }
-                else if (result == DialogResult.Yes) { using (var d = new OpenFileDialog { Filter = "Zip Files (*.zip)|*.zip" }) if (d.ShowDialog() == DialogResult.OK) luaFolderTextBox.Text = d.FileName; }
+                if (result == DialogResult.OK) { 
+                    using (var d = new FolderBrowserDialog()) 
+                        if (d.ShowDialog() == DialogResult.OK) {
+                            luaFolderTextBox.Text = d.SelectedPath;
+                            UpdateGameNameDisplay();
+                        }
+                }
+                else if (result == DialogResult.Yes) { 
+                    using (var d = new OpenFileDialog { Filter = "Zip Files (*.zip)|*.zip" }) 
+                        if (d.ShowDialog() == DialogResult.OK) {
+                            luaFolderTextBox.Text = d.FileName;
+                            UpdateGameNameDisplay();
+                        }
+                }
             }
         }
         private void LuaFolderTextBox_DragEnter(object sender, DragEventArgs e) { if (e.Data.GetDataPresent(DataFormats.FileDrop)) e.Effect = DragDropEffects.Copy; }
-        private void LuaFolderTextBox_DragDrop(object sender, DragEventArgs e) { string[] paths = (string[])e.Data.GetData(DataFormats.FileDrop); if (paths.Length > 0) luaFolderTextBox.Text = paths[0]; }
+        private void LuaFolderTextBox_DragDrop(object sender, DragEventArgs e) { 
+            string[] paths = (string[])e.Data.GetData(DataFormats.FileDrop); 
+            if (paths.Length > 0) {
+                luaFolderTextBox.Text = paths[0];
+                UpdateGameNameDisplay();
+            }
+        }
         private void AppListBrowseButton_Click(object sender, EventArgs e) { using (var d = new FolderBrowserDialog()) if (d.ShowDialog() == DialogResult.OK) appListPathTextBox.Text = d.SelectedPath; }
         private bool ValidateSteamPath(string path) { return File.Exists(Path.Combine(path, "config", "config.vdf")); }
+        
+        private void UpdateGameNameDisplay()
+        {
+            try {
+                if (string.IsNullOrWhiteSpace(luaFolderTextBox.Text) || 
+                    (!Directory.Exists(luaFolderTextBox.Text) && !File.Exists(luaFolderTextBox.Text))) {
+                    gameNameLabel.Visible = false;
+                    return;
+                }
+                
+                var (_, luaFileName) = FindFirstLuaFileContent(luaFolderTextBox.Text);
+                string appId = Path.GetFileNameWithoutExtension(luaFileName);
+                string gameName = GetGameNameFromSteamDB(appId);
+                
+                gameNameLabel.Text = gameName;
+                gameNameLabel.Visible = true;
+            } catch {
+                gameNameLabel.Visible = false;
+            }
+        }
         
         private void ValidateButton_Click(object sender, EventArgs e)
         {
@@ -263,9 +367,21 @@ namespace GreenSteam
         private async void ApplyButton_Click(object sender, EventArgs e)
         {
             if (!ValidatePaths()) return;
+            
+            // Prompt user to select installation drive
+            string acfTargetFolder = PromptForInstallationDrive();
+            if (string.IsNullOrEmpty(acfTargetFolder)) {
+                MessageBox.Show("Installation drive selection cancelled.", "Cancelled", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            
             SetButtonsEnabled(false);
             progressBar.Value = 0; progressBar.Maximum = 7; progressBar.Visible = true;
-            try { await Task.Run(() => EditConfig()); }
+            try { 
+                await Task.Run(() => EditConfig(acfTargetFolder));
+                // Enable the install button after successful apply
+                installButton.Enabled = true;
+            }
             catch (Exception ex) { MessageBox.Show(ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error); UpdateStatus("Error occurred"); }
             finally { SetButtonsEnabled(true); progressBar.Visible = false; }
         }
@@ -289,51 +405,36 @@ namespace GreenSteam
             try {
                 attentionLabel.Visible = false; 
                 KillSteamProcesses();
-                var (_, luaFileName) = FindFirstLuaFileContent(luaFolderTextBox.Text); 
-                string appId = Path.GetFileNameWithoutExtension(luaFileName);
-                string installCommand = $"app_install {appId}";
                 string baseDir = Path.GetDirectoryName(appListPathTextBox.Text);
 
+                // Launch DLLInjector
                 Process.Start(new ProcessStartInfo(Path.Combine(baseDir, "DLLInjector.exe")) { WorkingDirectory = baseDir, UseShellExecute = true });
                 
-                if (!WaitForSteamProcessToStart(15000)) return;
-                Process.Start("explorer.exe", "steam://open/console");
-                IntPtr steamHandle = IntPtr.Zero;
-                Stopwatch sw = Stopwatch.StartNew();
-                while (sw.ElapsedMilliseconds < 15000 && steamHandle == IntPtr.Zero) {
-                    steamHandle = FindWindow(null, "Steam");
-                    if (steamHandle == IntPtr.Zero) Thread.Sleep(200);
+                if (!WaitForSteamProcessToStart(15000)) {
+                    MessageBox.Show("Steam failed to start within the expected time.", "Timeout", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
                 }
-                if (steamHandle != IntPtr.Zero) {
-                    SetForegroundWindow(steamHandle);
-                    if (GetWindowRect(steamHandle, out RECT r)) {
-                        int centerX = r.Left + (r.Right - r.Left) / 2;
-                        int centerY = r.Top + (r.Bottom - r.Top) / 2;
-                        Cursor.Position = new Point(centerX, centerY);
-                        mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0); Thread.Sleep(50); mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
-                    }
-                    Thread.Sleep(2000); 
-                }
-                Clipboard.SetText(installCommand); Thread.Sleep(400); 
-                keybd_event(VK_CONTROL, 0, 0, 0); keybd_event(VK_V, 0, 0, 0); Thread.Sleep(50);
-                keybd_event(VK_V, 0, KEYEVENTF_KEYUP, 0); keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0); 
-                Thread.Sleep(200); SendKeys.SendWait("~");
 
-                Thread.Sleep(1000); 
-                SystemSounds.Exclamation.Play(); 
+                UpdateStatus("Steam launched successfully!");
+                MessageBox.Show("Steam has been launched with the injector. The game should appear in your library.", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
 
-                attentionLabel.Text = $"ATTENTION: If the game does not start downloading, the automatic paste may have failed.\n" +
-                                     $"Please switch to the Steam Console window and manually press CTRL+V then ENTER\n" +
-                                     $"The command '{installCommand}' is still in your clipboard.";
-                attentionLabel.Visible = true;
-
-            } catch (Exception ex) { MessageBox.Show(ex.Message); }
+            } catch (Exception ex) { MessageBox.Show(ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error); }
         }
 
         private void SetButtonsEnabled(bool e) { validateButton.Enabled = previewButton.Enabled = applyButton.Enabled = installButton.Enabled = e; }
         private bool ValidatePaths() { return Directory.Exists(steamPathTextBox.Text) && (Directory.Exists(luaFolderTextBox.Text) || luaFolderTextBox.Text.EndsWith(".zip")) && Directory.Exists(appListPathTextBox.Text); }
         
-		private void EditConfig()
+        private string PromptForInstallationDrive()
+        {
+            using (var driveSelector = new DriveSelectionDialog(steamPathTextBox.Text)) {
+                if (driveSelector.ShowDialog() == DialogResult.OK) {
+                    return driveSelector.SelectedSteamAppsFolder;
+                }
+                return null;
+            }
+        }
+        
+		private void EditConfig(string acfTargetFolder)
         {
             var steamFolder = steamPathTextBox.Text;
             var luaFolder = luaFolderTextBox.Text;
@@ -386,7 +487,8 @@ namespace GreenSteam
             }
 
             BeginInvoke(new Action(() => { UpdateStatus("Creating ACF file..."); progressBar.Value = 7; }));
-            CreateAcfFile(steamFolder, baseLuaFileName, gameName);
+            string installDir = GetInstallDirFromSteamDB(baseLuaFileName);
+            CreateAcfFile(acfTargetFolder, baseLuaFileName, installDir);
 
             SaveSettings();
             
@@ -395,21 +497,16 @@ namespace GreenSteam
             }));
         }
 
-        private void CreateAcfFile(string steamFolder, string appId, string gameName)
+        private void CreateAcfFile(string targetSteamAppsFolder, string appId, string installDir)
         {
-            string steamappsFolder = Path.Combine(steamFolder, "steamapps");
-            
             // Create steamapps folder if it doesn't exist
-            if (!Directory.Exists(steamappsFolder)) {
-                Directory.CreateDirectory(steamappsFolder);
+            if (!Directory.Exists(targetSteamAppsFolder)) {
+                Directory.CreateDirectory(targetSteamAppsFolder);
             }
-
-            // Sanitize the game name for use as install directory
-            string installDir = SanitizeInstallDir(gameName);
             
             // Create ACF filename
             string acfFileName = $"appmanifest_{appId}.acf";
-            string acfPath = Path.Combine(steamappsFolder, acfFileName);
+            string acfPath = Path.Combine(targetSteamAppsFolder, acfFileName);
 
             // Create ACF content with exact formatting
             var acfLines = new List<string>
@@ -515,6 +612,140 @@ namespace GreenSteam
         }
         
         public class AppEntry { public string AppId { get; set; } public string Key { get; set; } }
+    }
+
+    public class DriveSelectionDialog : Form
+    {
+        public string SelectedSteamAppsFolder { get; private set; }
+        private ListBox driveListBox;
+        private string defaultSteamFolder;
+
+        public DriveSelectionDialog(string steamFolder)
+        {
+            defaultSteamFolder = steamFolder;
+            this.Text = "Select Installation Drive";
+            this.Size = new Size(500, 300);
+            this.StartPosition = FormStartPosition.CenterParent;
+            this.FormBorderStyle = FormBorderStyle.FixedDialog;
+            this.MaximizeBox = false;
+            this.MinimizeBox = false;
+            this.BackColor = Color.FromArgb(45, 45, 48);
+
+            var promptLabel = new Label
+            {
+                Text = "Select the drive where you want to install the game:",
+                Location = new Point(20, 20),
+                AutoSize = true,
+                ForeColor = Color.White,
+                Font = new Font("Segoe UI", 10f)
+            };
+
+            driveListBox = new ListBox
+            {
+                Location = new Point(20, 50),
+                Size = new Size(440, 150),
+                Font = new Font("Segoe UI", 9f),
+                BackColor = Color.FromArgb(30, 30, 30),
+                ForeColor = Color.White
+            };
+
+            PopulateDriveList();
+
+            var okButton = new Guna2Button
+            {
+                Text = "OK",
+                Location = new Point(280, 220),
+                Size = new Size(90, 35),
+                FillColor = Color.ForestGreen,
+                ForeColor = Color.White,
+                Font = new Font("Segoe UI", 9.75f, FontStyle.Bold)
+            };
+            okButton.Click += (s, e) =>
+            {
+                if (driveListBox.SelectedItem != null)
+                {
+                    var selected = (DriveItem)driveListBox.SelectedItem;
+                    SelectedSteamAppsFolder = selected.SteamAppsPath;
+                    this.DialogResult = DialogResult.OK;
+                    this.Close();
+                }
+                else
+                {
+                    MessageBox.Show("Please select a drive.", "No Selection", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+            };
+
+            var cancelButton = new Guna2Button
+            {
+                Text = "Cancel",
+                Location = new Point(380, 220),
+                Size = new Size(90, 35),
+                FillColor = Color.Gray,
+                ForeColor = Color.White,
+                Font = new Font("Segoe UI", 9.75f, FontStyle.Bold)
+            };
+            cancelButton.Click += (s, e) =>
+            {
+                this.DialogResult = DialogResult.Cancel;
+                this.Close();
+            };
+
+            this.Controls.AddRange(new Control[] { promptLabel, driveListBox, okButton, cancelButton });
+        }
+
+        private void PopulateDriveList()
+        {
+            // Add default Steam folder first
+            string defaultSteamApps = Path.Combine(defaultSteamFolder, "steamapps");
+            driveListBox.Items.Add(new DriveItem
+            {
+                DisplayText = $"[Default] {defaultSteamApps}",
+                SteamAppsPath = defaultSteamApps,
+                IsDefault = true
+            });
+
+            // Add all available drives with steamapps folders
+            var drives = DriveInfo.GetDrives().Where(d => d.IsReady && d.DriveType == DriveType.Fixed);
+            foreach (var drive in drives)
+            {
+                // Check common Steam library locations
+                var possiblePaths = new[]
+                {
+                    Path.Combine(drive.RootDirectory.FullName, "SteamLibrary", "steamapps"),
+                    Path.Combine(drive.RootDirectory.FullName, "Program Files (x86)", "Steam", "steamapps"),
+                    Path.Combine(drive.RootDirectory.FullName, "Steam", "steamapps")
+                };
+
+                foreach (var path in possiblePaths)
+                {
+                    if (Directory.Exists(path) && path != defaultSteamApps)
+                    {
+                        long freeSpace = drive.AvailableFreeSpace / (1024 * 1024 * 1024); // Convert to GB
+                        driveListBox.Items.Add(new DriveItem
+                        {
+                            DisplayText = $"{path} ({freeSpace} GB free)",
+                            SteamAppsPath = path,
+                            IsDefault = false
+                        });
+                    }
+                }
+            }
+
+            // Select the default item
+            if (driveListBox.Items.Count > 0)
+            {
+                driveListBox.SelectedIndex = 0;
+            }
+        }
+
+        private class DriveItem
+        {
+            public string DisplayText { get; set; }
+            public string SteamAppsPath { get; set; }
+            public bool IsDefault { get; set; }
+
+            public override string ToString() => DisplayText;
+        }
     }
 
     public class SourceSelectionDialog : Form
